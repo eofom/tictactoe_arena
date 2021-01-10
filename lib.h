@@ -88,12 +88,12 @@ private:
 
 class BoardStateChecker {
 public:
-    BoardStateChecker(int seed, int count) {
+    BoardStateChecker(int seed, int count, int minSubsetSize, int maxSubsetSize) {
         std::mt19937 generator(seed);
         std::uniform_int_distribution<uint32_t> positionDistribution(0, kBoardSize - 1);
         winningSubsets.reserve(count);
         for (Index winningSubsetIndex = 0; winningSubsetIndex < count; ++winningSubsetIndex) {
-            auto subsetSize = std::uniform_int_distribution<int>(3, 5)(generator);
+            auto subsetSize = std::uniform_int_distribution<int>(minSubsetSize, maxSubsetSize)(generator);
             std::vector<Index> positions;
             for (Index positionIndex = 0; positionIndex < subsetSize; ++positionIndex) {
                 Index nextPosition;
@@ -208,12 +208,12 @@ double getCurrentSeconds() {
     return static_cast<double>(durationNow.count()) * kPrecision;
 }
 
-void playTictactoe(std::vector<std::unique_ptr<BasePlayer>> &players, const int iterations, bool verbose = false) {
+std::vector<int> playTictactoe(std::vector<std::shared_ptr<BasePlayer>> &players, const int iterations, bool verbose = false) {
     auto startTime = getCurrentSeconds();
     const auto kReseedFrequency = 1000000;
     std::random_device rd;
     std::mt19937 generator(rd());
-    std::vector<uint32_t> winsByPlayer(players.size() + 1);
+    std::vector<int> winsByPlayer(players.size() + 1);
     std::vector<double> timeSpentByPlayer(players.size() + 1);
 
     for (auto playerIndex = 0; playerIndex < players.size(); ++playerIndex) {
@@ -233,7 +233,7 @@ void playTictactoe(std::vector<std::unique_ptr<BasePlayer>> &players, const int 
         }
 
         TictactoeBoard board{};
-        BoardStateChecker checker(generator(), 15);
+        BoardStateChecker checker(generator(), 15, 3, 5);
 
         auto turnDecider = std::uniform_int_distribution<Index>(0, players.size() - 1);
         for (auto turn = 0; turn < kBoardSize; ++turn) {
@@ -266,16 +266,101 @@ void playTictactoe(std::vector<std::unique_ptr<BasePlayer>> &players, const int 
     for (int i = 0; i < players.size(); ++i) {
         timeSpentByPlayer.at(kNoPlayerNumber) -= timeSpentByPlayer.at(i + 1);
     }
-    for (Index playerNumber = 0; playerNumber < winsByPlayer.size(); ++playerNumber) {
-        if (playerNumber == kNoPlayerNumber) {
-            std::cout << "Draws:\t";
-        } else {
-            std::cout << players.at(playerNumber - 1)->getName() << " wins: ";
+
+    if (verbose) {
+        for (Index playerNumber = 0; playerNumber < winsByPlayer.size(); ++playerNumber)
+        {
+            if (playerNumber == kNoPlayerNumber)
+            {
+                std::cout << "Draws:\t";
+            } else
+            {
+                std::cout << players.at(playerNumber - 1)->getName() << " wins: ";
+            }
+            auto wins = winsByPlayer.at(playerNumber);
+            std::cout << wins << " = " << static_cast<double>(wins) / iterations;
+            std::cout << " time spent: " << timeSpentByPlayer.at(playerNumber) << "s\n";
         }
-        auto wins = winsByPlayer.at(playerNumber);
-        std::cout << wins << " = " << static_cast<double>(wins) / iterations;
-        std::cout << " time spent: " << timeSpentByPlayer.at(playerNumber) << "s\n";
     }
+    winsByPlayer.erase(winsByPlayer.begin());
+    return winsByPlayer;
+}
+
+void playTictactoeTournament(std::vector<std::shared_ptr<BasePlayer>> &players, int playersPerGame) {
+    std::cout << playersPerGame << " players per game tournament\n";
+    constexpr int kIterationsPerGame = 100'000;
+    auto size = players.size();
+
+    struct PlayerScore {
+        int score = 0;
+        int64_t tiebraker = 0;
+
+        bool operator<(const PlayerScore &other) const {
+            return score < other.score || (score == other.score && tiebraker < other.tiebraker);
+        }
+    };
+
+    std::vector<PlayerScore> scores(players.size());
+    std::vector<int> inGamePlayersOrder;
+    for (int i = 0; i < playersPerGame; ++i) {
+        inGamePlayersOrder.emplace_back(i);
+    }
+
+    std::vector<int> playingPlayersIndexes(playersPerGame);
+
+    for (int i = 0; i < size; ++i) {
+        for (int j = i + 1; j < size; ++j) {
+            for (int k = j + 1; k <= size; ++k) {
+                if (playersPerGame == 3 && k == size) {
+                    break;
+                }
+                std::vector<std::shared_ptr<BasePlayer>> playersForGame;
+                playingPlayersIndexes.at(0) = i;
+                playersForGame.push_back(players.at(i));
+                playingPlayersIndexes.at(1) = j;
+                playersForGame.push_back(players.at(j));
+                if (playersPerGame == 3) {
+                    playersForGame.push_back(players.at(k));
+                    playingPlayersIndexes.at(2) = k;
+                }
+                auto results = playTictactoe(playersForGame, kIterationsPerGame);
+                std::sort(inGamePlayersOrder.begin(), inGamePlayersOrder.end(), [&results](auto lhs, auto rhs) {
+                    return results.at(lhs) < results.at(rhs);
+                });
+
+                for (int score = playersPerGame - 1; score >= 0; --score) {
+                    auto inGamePlayerIndex = inGamePlayersOrder.at(score);
+                    std::cout << playersForGame.at(inGamePlayerIndex)->getName() << ": " << score
+                        << "  (" << results.at(inGamePlayerIndex) << ") ";
+                    auto playerIndex = playingPlayersIndexes.at(inGamePlayerIndex);
+                    auto &playerScore = scores.at(playerIndex);
+                    playerScore.score += score;
+                    playerScore.tiebraker += results.at(inGamePlayerIndex);
+                }
+                std::cout << std::endl;
+
+                if (playersPerGame == 2) {
+                    break;
+                }
+            }
+        }
+    }
+
+    std::vector<int> playersOrder;
+    for (int i = 0; i < players.size(); ++i) {
+        playersOrder.emplace_back(i);
+    }
+
+    std::sort(playersOrder.begin(), playersOrder.end(), [&scores](auto lhs, auto rhs) {
+       return scores.at(lhs) < scores.at(rhs);
+    });
+
+    for (int i = 0; i < size; ++i) {
+        auto playerIndex = playersOrder.at(i);
+        std::cout << players.at(playerIndex)->getName() << " score: " << scores.at(playerIndex).score
+            << " tiebraker: " << scores.at(playerIndex).tiebraker << std::endl;
+    }
+    std::cout << std::endl;
 }
 
 #endif // TICTACTOE_PLAYER_H
