@@ -1,5 +1,5 @@
-#ifndef TICTACTOE_PLAYER_H
-#define TICTACTOE_PLAYER_H
+#ifndef TICTACTOE_LIB_H
+#define TICTACTOE_LIB_H
 
 #include <iostream>
 #include <array>
@@ -18,21 +18,38 @@ constexpr Index kNoPlayerNumber = 0u;
 constexpr Index kFirstPlayerNumber = 1u;
 constexpr Index kMaxPlayers = 3u;
 constexpr Index kBoardSize = 16;
+constexpr CellsMask kFirstCell = 0b11u;
+
+constexpr Index getCellShift(Index cellPosition) {
+    return cellPosition << 1u;
+}
+
+constexpr Index getCellMask(Index cellPosition) {
+    return kFirstCell << getCellShift(cellPosition);
+}
+
+constexpr Index getCellMaskForPlayer(Index cellPosition, Index playerNumber) {
+    return playerNumber << getCellShift(cellPosition);
+}
+
+constexpr bool cellIsInSubset(CellsMask subsetMask, Index cell) {
+    return static_cast<bool>(subsetMask & getCellMask(cell));
+}
 
 void printBoard(BoardState board, bool digitsOnEmptySpaces = true) {
     constexpr std::array<char, 4> playerSymbols{'.', 'X', 'O', '#'};
     std::cout << std::hex;
-    for (Index position = 0; position < kBoardSize; ++position) {
-        auto shift = (position << 1u);
-        auto mask = 0b11u << shift;
-        Index playerNumber = (board & mask) >> shift;
+    for (Index cellPosition = 0; cellPosition < kBoardSize; ++cellPosition) {
+        auto shift = getCellShift(cellPosition);
+        auto cellMask = kFirstCell << shift;
+        Index playerNumber = (board & cellMask) >> shift;
         if (playerNumber == kNoPlayerNumber && digitsOnEmptySpaces) {
-            std::cout << position;
+            std::cout << cellPosition;
         } else {
             std::cout << playerSymbols.at(playerNumber);
         }
 
-        auto modulo4 = position - ((position >> 2u) << 2u);
+        auto modulo4 = cellPosition - ((cellPosition >> 2u) << 2u);
         if (modulo4 < 3u) {
             std::cout << " ";
         } else {
@@ -44,13 +61,12 @@ void printBoard(BoardState board, bool digitsOnEmptySpaces = true) {
 
 class TictactoeBoard {
 public:
-    static inline Index getCellShift(Index cell) {
-        return cell << 1u;
+    constexpr Index getPlayerOnCell(Index position) const {
+        return (board_ >> getCellShift(position)) & kFirstCell;
     }
 
-    bool cellIsOccupied(Index cell) const {
-        CellsMask cellMask = 0b11u << getCellShift(cell);
-        return static_cast<bool>(board_ & cellMask);
+    constexpr bool cellIsOccupied(Index cell) const {
+        return getPlayerOnCell(cell) != kNoPlayerNumber;
     }
 
     int countEmptyCells() const {
@@ -70,7 +86,7 @@ public:
         if (cellIsOccupied(cell)) {
             throw std::invalid_argument("trying to play on occupied cell");
         }
-        auto playerMask = playerNumber << getCellShift(cell);
+        auto playerMask = getCellMaskForPlayer(cell, playerNumber);
         board_ |= playerMask;
     }
 
@@ -287,7 +303,7 @@ std::vector<int> playTictactoe(std::vector<std::shared_ptr<BasePlayer>> &players
 }
 
 void playTictactoeTournament(std::vector<std::shared_ptr<BasePlayer>> &players, int playersPerGame) {
-    std::cout << playersPerGame << " players per game tournament\n";
+    std::cout << playersPerGame << " players per game tournament:\n";
     constexpr int kIterationsPerGame = 100'000;
     auto size = players.size();
 
@@ -307,7 +323,7 @@ void playTictactoeTournament(std::vector<std::shared_ptr<BasePlayer>> &players, 
     }
 
     std::vector<int> playingPlayersIndexes(playersPerGame);
-
+    std::cout << "Games:\n";
     for (int i = 0; i < size; ++i) {
         for (int j = i + 1; j < size; ++j) {
             for (int k = j + 1; k <= size; ++k) {
@@ -352,9 +368,10 @@ void playTictactoeTournament(std::vector<std::shared_ptr<BasePlayer>> &players, 
     }
 
     std::sort(playersOrder.begin(), playersOrder.end(), [&scores](auto lhs, auto rhs) {
-       return scores.at(lhs) < scores.at(rhs);
+       return scores.at(rhs) < scores.at(lhs);
     });
 
+    std::cout << "\nresults:\n";
     for (int i = 0; i < size; ++i) {
         auto playerIndex = playersOrder.at(i);
         std::cout << players.at(playerIndex)->getName() << " score: " << scores.at(playerIndex).score
@@ -363,4 +380,4 @@ void playTictactoeTournament(std::vector<std::shared_ptr<BasePlayer>> &players, 
     std::cout << std::endl;
 }
 
-#endif // TICTACTOE_PLAYER_H
+#endif // TICTACTOE_LIB_H
